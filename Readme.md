@@ -21,8 +21,7 @@ import (
 ```go
 func karai.JoinChannel(addressport, pubKey, signedKey string)
 ```
-
-_ConnectChannel() Takes a ktx address with port, boolean for new or returning, and a set of keys. Outputs a websocket and CA cert. Initiates the connection process to a Karai Transaction Channel_
+_JoinChannel() Takes a ktx address with port, boolean for new or returning, and a set of keys. Outputs a websocket and CA cert. Initiates the connection process to a Karai Transaction Channel_
 
 -   `ktx` is a string that looks like `12.23.34.45:4200` or `zeus.karai.io:4200`
 -   `isNew` is a bool to signify if you are new or returning
