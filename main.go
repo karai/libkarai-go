@@ -1,24 +1,15 @@
 package libkarai
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
-
-// ED25519Keys This is a struct for holding keys and a signature.
-type ED25519Keys struct {
-	publicKey  string
-	privateKey string
-	signedKey  string
-}
 
 const appName = "libkarai-go"
 const appDev = "RockSteadyTC"
@@ -27,154 +18,88 @@ const appLicense = "https://choosealicense.com/licenses/mit/"
 const appRepository = "https://github.com/karai/libkarai-go"
 const appURL = "https://karai.io"
 
-var pubkMsg []byte = []byte("PUBK")
+var (
+	isNew bool
+	// isTrusted bool
+)
+
+// ED25519Keys This is a struct for holding keys and a signature.
+type ED25519Keys struct {
+	publicKey  string
+	privateKey string
+	signedKey  string
+	selfCert   string
+}
 
 // Version Prints the semver of libkarai-go as string
 func Version() string {
-	var majorSemver, minorSemver, patchSemver, wholeString string
-	majorSemver = "0"
-	minorSemver = "0"
-	patchSemver = "1"
-	wholeString = majorSemver + "." + minorSemver + "." + patchSemver
-	return wholeString
+	var major, minor, patch, version string
+	major = "0"
+	minor = "1"
+	patch = "2"
+	version = major + "." + minor + "." + patch
+	return version
 }
 
-func timeStamp() string {
-	current := time.Now()
-	return current.Format("2006-01-02 15:04:05")
+// Send Takes a data string and a websocket connection
+func Send(msg string, conn *websocket.Conn) error {
+	err := conn.WriteMessage(1, []byte("send "+msg))
+	handle("There was a problem sending your transaction ", err)
+	return err
 }
 
-// ConnectChannel Connects to a karai transaction channel using ktx, pubkey, and signedkey strings
-func ConnectChannel(addressport, pubKey, signedKey string) {
-	// fmt.Printf("\nConnection request with ktx %s", ktx)
-	// connect
-	// if isCoordinator {
-	// 	logrus.Error("This is for nodes running in client mode only.")
-	// }
-	// if !isCoordinator {
-	// Construct a URL for the websocket.
-	// For now all that exists is the v1 API, at the /channel
-	// endpoint.
-	urlConnection := url.URL{Scheme: "ws", Host: addressport, Path: "/api/v1/channel"}
-	// Announce the URL we are connecting to
-	// fmt.Printf("\nConnecting to %s", urlConnection.String())
-	// Make the call to the socket using
-	// the URL we composed.
-	conn, _, _ := websocket.DefaultDialer.Dial(urlConnection.String(), nil)
-	// handle("There was a problem connecting to the channel: ", err)
-	// Craft a message with JOIN as the first word and
-	// our nodes pubkey as the second word
-	joinReq := "JOIN " + pubKey
-	// fmt.Printf("\nSending: %s", joinReq)
-	// Initial Connection Sends N1:PK to Coord
-	_ = conn.WriteMessage(1, []byte(joinReq))
-	// Conditionally validate the response
-	// The response is the coordinator signature of
-	// the node public key we just sent it, so here
-	// we are telling karai to listen for the response
-	// and consider it as the pubkeysig
-	_, connectionResponse, _ := conn.ReadMessage()
-	if strings.Contains(string(connectionResponse), "Welcome back") {
-		fmt.Println("\nConnected")
-		// keep alive?
-	} else {
-		if len(connectionResponse) != 128 {
-			// fmt.Println("\nThe Coordinator Public Key Signature we received was not the correct length. \nIt should be 128 characters.")
-			// fmt.Println("\"" + string(connectionResponse) + "\"" + " is " + string(len(connectionResponse)) + " characters long.")
-			// fmt.Println("\nThere seems to be a problem: ", string(connectionResponse))
-			return
-		}
-		// Print some things to help debug
-		// fmt.Printf("\n%s\n", readMessageRecvPubKeySig)
-		// fmt.Printf("\n%s\n", pubKey)
-		// if err != nil {
-		// 	fmt.Println("\nThere was a problem reading this message:", err)
-		// 	return
-		// }
-		// The one issue encountered here is the sig being
-		// the wrong length, so lets make sure that is 128
-		if len(connectionResponse) == 128 {
-			signature := string(bytes.TrimRight(connectionResponse, "\n"))
-			// Printing the signature for debugging purposes
-			// fmt.Printf("\nCoord Pubkey Signature: %s", signature)
-			// Write a message to the coordinator requesting
-			// the coordinator pubkey. Store it as a var.
-			// fmt.Printf("\nSending: PUBK request for Coord pubkey...")
-			_ = conn.WriteMessage(1, pubkMsg)
-			_, readMessageRecvCoordPubKey, _ := conn.ReadMessage()
-			coordPubkey := string(bytes.TrimRight(readMessageRecvCoordPubKey, "\n"))
-			// Print the coordinator pubkey signature for debug
-			// fmt.Printf("\nCoord Pubkey Signature: %s\n", readMessageRecvCoordPubKey)
-			// fmt.Printf("\nReceived Coord PubKey: %s", coordPubkey)
-			// fmt.Printf("\nReceived Coord Signature:\t%s", signature)
-			if VerifySignedKey(pubKey, coordPubkey, signature) {
-				// fmt.Println("\nCoordinator signature verified ✔️")
-				n1smsg := "NSIG" + signedKey
-				// Send the signed key for N1s as bytes
-				// fmt.Printf("Sending NSIG message to Coordinator...\n%s", n1smsg)
-				_ = conn.WriteMessage(1, []byte(n1smsg))
-				_, n1sresponse, _ := conn.ReadMessage()
-				hashedSigCertResponse := bytes.TrimRight(n1sresponse, "\n")
-				hashedSigCertResponseNoPrefix := string(bytes.TrimLeft(hashedSigCertResponse, "CERT "))
-				// fmt.Println(hashedSigCertResponseNoPrefix)
-				if len(hashedSigCertResponseNoPrefix) == 128 {
-					fmt.Printf("\n[%s] [%s] Certificate Granted\n", timeStamp(), conn.RemoteAddr())
-					fmt.Printf("user> ")
-					fmt.Printf("%s\n", pubKey)
-					fmt.Printf("cert> ")
-					fmt.Printf("%s\n", hashedSigCertResponseNoPrefix)
-				} else {
-					fmt.Printf("%v is the wrong size\n%s", len(hashedSigCertResponseNoPrefix), hashedSigCertResponseNoPrefix)
-				}
-			}
-		} else {
-			// fmt.Println("\nDrat! It failed..")
-			return
-		}
+// JoinChannel Takes a ktx address with port, boolean for new or returning, and keys. Outputs a websocket and CA cert
+func JoinChannel(ktx string, isNew bool, keyCollection *ED25519Keys) (*websocket.Conn, string) {
+	// request a websocket connection
+	var conn = requestSocket(ktx, "1")
+	// using that connection, attempt to join the channel
+	var joinedChannel = joinStatement(conn, isNew, keyCollection)
+	// parse channel messages
+	cert := socketMsgParser(ktx, joinedChannel, keyCollection)
+	// return the connection
+	return conn, cert
+}
+
+func joinStatement(conn *websocket.Conn, isNew bool, keyCollection *ED25519Keys) *websocket.Conn {
+	// new users should send JOIN with the pubkey
+	if isNew {
+		joinReq := "JOIN " + keyCollection.publicKey[:64]
+		_ = conn.WriteMessage(1, []byte(joinReq))
 	}
+	// returning users should send RTRN and the signed CA cert
+	if !isNew {
+		rtrnReq := "RTRN " + keyCollection.publicKey[:64] + " " + keyCollection.selfCert
+		_ = conn.WriteMessage(1, []byte(rtrnReq))
+	}
+	return conn
 }
 
-// GenerateKeys Generates ed25519 keyset as strings
-func GenerateKeys() *ED25519Keys {
-	keys := ED25519Keys{}
-	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		panic(err)
+func returnMessage(conn *websocket.Conn, pubKey string, keyCollection *ED25519Keys) *websocket.Conn {
+	if !isNew {
+		rtrnReq := "RTRN " + pubKey[:64] + " " + keyCollection.selfCert
+		_ = conn.WriteMessage(1, []byte(rtrnReq))
 	}
-	keys.privateKey = hex.EncodeToString(privKey[0:32])
-	keys.publicKey = hex.EncodeToString(pubKey)
-	signedKey := ed25519.Sign(privKey, pubKey)
-	keys.signedKey = hex.EncodeToString(signedKey)
-	return &keys
+	return conn
 }
 
-// Sign Takes keys and a message to sign
-func Sign(myKeys *ED25519Keys, msg string) string {
-	messageBytes := []byte(msg)
-	privateKey, err := hex.DecodeString(myKeys.privateKey)
-	if err != nil {
-		panic(err)
-	}
-	publicKey, err := hex.DecodeString(myKeys.publicKey)
-	if err != nil {
-		panic(err)
-	}
-	privateKey = append(privateKey, publicKey...)
-	signature := ed25519.Sign(privateKey, messageBytes)
-	return hex.EncodeToString(signature)
+func requestSocket(ktx, protocolVersion string) *websocket.Conn {
+	urlConnection := url.URL{Scheme: "ws", Host: ktx, Path: "/api/v" + protocolVersion + "/channel"}
+	conn, _, err := websocket.DefaultDialer.Dial(urlConnection.String(), nil)
+	handle("There was a problem connecting to the channel: ", err)
+	return conn
 }
 
-// SignKey Sign a set of keys
-func SignKey(myKeys *ED25519Keys, publicKey string) string {
+// SignKey Takes a key set and an ed25519 public key string parameter to sign a key. Returns a signature of the key signed with the key set.
+func SignKey(keyCollection *ED25519Keys, publicKey string) string {
 	messageBytes, err := hex.DecodeString(publicKey)
 	if err != nil {
 		panic(err)
 	}
-	privateKey, err := hex.DecodeString(myKeys.privateKey)
+	privateKey, err := hex.DecodeString(keyCollection.privateKey)
 	if err != nil {
 		panic(err)
 	}
-	pubKey, err := hex.DecodeString(myKeys.publicKey)
+	pubKey, err := hex.DecodeString(keyCollection.publicKey)
 	if err != nil {
 		panic(err)
 	}
@@ -183,8 +108,67 @@ func SignKey(myKeys *ED25519Keys, publicKey string) string {
 	return hex.EncodeToString(signature)
 }
 
-// VerifySignature Verifies a signature and returns true or false
-func VerifySignature(publicKey string, msg string, signature string) bool {
+func socketMsgParser(ktx string, conn *websocket.Conn, keyCollection *ED25519Keys) string {
+	_, joinResponse, err := conn.ReadMessage()
+	handle("There was a problem reading the socket: ", err)
+	if strings.HasPrefix(string(joinResponse), "WCBK") {
+		isNew = false
+		return string(joinResponse)
+	}
+	if strings.Contains(string(joinResponse), "CAPK") {
+		convertjoinResponseString := string(joinResponse)
+		trimNewLinejoinResponse := strings.TrimRight(convertjoinResponseString, "\n")
+		trimCmdPrefix := strings.TrimPrefix(trimNewLinejoinResponse, "CAPK ")
+		ncasMsgtring := SignKey(keyCollection, trimCmdPrefix[:64])
+		composedNcasMsgtring := "NCAS " + ncasMsgtring
+		_ = conn.WriteMessage(1, []byte(composedNcasMsgtring))
+		_, certResponse, _ := conn.ReadMessage()
+		isNew = false
+		return string(certResponse)
+	}
+	return "The stars did not align, you were denied access."
+}
+
+// GenerateKeys Generates ed25519 keyset as strings
+func GenerateKeys() *ED25519Keys {
+	keys := ED25519Keys{}
+	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		handle("error: ", err)
+	}
+	keys.privateKey = hex.EncodeToString(privKey[0:32])
+	keys.publicKey = hex.EncodeToString(pubKey)
+	signedKey := ed25519.Sign(privKey, pubKey)
+	keys.signedKey = hex.EncodeToString(signedKey)
+	keys.selfCert = keys.publicKey + keys.signedKey
+	return &keys
+}
+
+// handle Ye Olde Error Handler takes a message and an error code
+func handle(msg string, err error) {
+	if err != nil {
+		fmt.Printf("\n%s: %s", msg, err)
+	}
+}
+
+// Sign Takes keys and a message to sign
+func Sign(keyCollection *ED25519Keys, msg string) string {
+	messageBytes := []byte(msg)
+	privateKey, err := hex.DecodeString(keyCollection.privateKey)
+	if err != nil {
+		panic(err)
+	}
+	publicKey, err := hex.DecodeString(keyCollection.publicKey)
+	if err != nil {
+		panic(err)
+	}
+	privateKey = append(privateKey, publicKey...)
+	signature := ed25519.Sign(privateKey, messageBytes)
+	return hex.EncodeToString(signature)
+}
+
+// VerifySignature Takes a public key, a message, and a signature. This will return true if it verifies correctly.
+func VerifySignature(publicKey string, msg, signature string) bool {
 	pubKey, err := hex.DecodeString(publicKey)
 	if err != nil {
 		panic(err)
@@ -197,7 +181,7 @@ func VerifySignature(publicKey string, msg string, signature string) bool {
 	return ed25519.Verify(pubKey, messageBytes, sig)
 }
 
-// VerifySignedKey Verifies if the keys created are correct and returns boolean
+// VerifySignedKey Takes a public key, a public signing key, and a signature. This will return true if it verifies correctly.
 func VerifySignedKey(publicKey string, publicSigningKey string, signature string) bool {
 	pubKey, err := hex.DecodeString(publicKey)
 	if err != nil {
